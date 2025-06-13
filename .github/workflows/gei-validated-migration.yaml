@@ -1,0 +1,163 @@
+name: GEI Validated Repo Migration with Notifications
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_list_path:
+        description: 'Path to JSON file with repo names (relative to repo root)'
+        required: true
+        default: 'repos.json'
+      source_org:
+        description: 'GitHub Enterprise Server source organization name'
+        required: true
+      target_org:
+        description: 'GitHub Enterprise Cloud target organization name'
+        required: true
+      max_parallel:
+        description: 'Maximum number of concurrent repo migrations'
+        required: false
+        default: '4'
+      dry_run:
+        description: 'Perform dry-run only (true/false)'
+        required: false
+        default: 'false'
+
+env:
+  GH_PAT_SOURCE: ${{ secrets.GH_PAT_SOURCE }}
+  GH_PAT_TARGET: ${{ secrets.GH_PAT_TARGET }}
+  GH_SOURCE_URL: https://github.company.com
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+  SLACK_THREAD_TS: ${{ secrets.SLACK_THREAD_TS }}
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.repo_matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse repo list
+        id: set-matrix
+        run: |
+          FILE_PATH="${{ github.event.inputs.repo_list_path }}"
+          REPO_MATRIX=$(jq -c '{include: [.[] | {repo: .}]}' "$FILE_PATH")
+          echo "repo_matrix=${REPO_MATRIX}" >> $GITHUB_OUTPUT
+
+  audit-repos:
+    needs: generate-matrix
+    if: ${{ github.event.inputs.dry_run == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      max-parallel: ${{ github.event.inputs.max_parallel }}
+
+    env:
+      GH_SOURCE_ORG: ${{ github.event.inputs.source_org }}
+
+    steps:
+      - name: Setup
+        run: |
+          sudo apt-get update && sudo apt-get install -y gh jq
+          gh extension install github/gh-gei
+
+      - name: Auth
+        run: echo "${GH_PAT_SOURCE}" | gh auth login --with-token
+
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        run: |
+          gh api /repos/$GH_SOURCE_ORG/"${{ matrix.repo }}"
+
+      - name: Record result
+        run: |
+          mkdir -p tmp
+          echo "${{ matrix.repo }}: $([[ ${{ steps.audit.outcome }} == 'success' ]] && echo AUDIT OK || echo AUDIT FAIL)" >> tmp/audit-summary.txt
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-summary
+          path: tmp/audit-summary.txt
+
+  migrate-repos:
+    needs: generate-matrix
+    if: ${{ github.event.inputs.dry_run == 'false' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      max-parallel: ${{ github.event.inputs.max_parallel }}
+
+    env:
+      GH_SOURCE_ORG: ${{ github.event.inputs.source_org }}
+      GH_TARGET_ORG: ${{ github.event.inputs.target_org }}
+
+    steps:
+      - name: Setup
+        run: |
+          sudo apt-get update && sudo apt-get install -y gh jq
+          gh extension install github/gh-gei
+
+      - name: Auth
+        run: echo "${GH_PAT_TARGET}" | gh auth login --with-token
+
+      - name: Migrate
+        id: migrate
+        continue-on-error: true
+        run: |
+          gh gei migrate-repo \
+            --github-source-org "$GH_SOURCE_ORG" \
+            --github-target-org "$GH_TARGET_ORG" \
+            --repo "${{ matrix.repo }}" \
+            --source-url "$GH_SOURCE_URL" \
+            --github-source-pat "$GH_PAT_SOURCE" \
+            --github-target-pat "$GH_PAT_TARGET"
+
+      - name: Record result
+        run: |
+          mkdir -p tmp
+          echo "${{ matrix.repo }}: $([[ ${{ steps.migrate.outcome }} == 'success' ]] && echo SUCCESS || echo FAILURE)" >> tmp/migration-summary.txt
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-summary
+          path: tmp/migration-summary.txt
+
+  notify:
+    needs: [audit-repos, migrate-repos]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download summaries
+        uses: actions/download-artifact@v4
+        with:
+          path: summaries
+
+      - name: Compile summary message
+        id: compile
+        run: |
+          TYPE=${{ github.event.inputs.dry_run == 'true' && 'Audit' || 'Migration' }}
+          FILE=$(find summaries -name '*summary.txt')
+          TOTAL=$(wc -l < "$FILE")
+          SUCCESS=$(grep -c 'SUCCESS\|AUDIT OK' "$FILE")
+          FAILED=$(grep -c 'FAILURE\|AUDIT FAIL' "$FILE")
+
+          echo "message=${TYPE} Complete ✅\nTotal: $TOTAL\nSucceeded: $SUCCESS\nFailed: $FAILED" >> $GITHUB_OUTPUT
+
+      - name: Send Slack summary
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": \"${{ steps.compile.outputs.message }}\"${SLACK_THREAD_TS:+, \"thread_ts\": \"$SLACK_THREAD_TS\"}}" \
+            $SLACK_WEBHOOK_URL
+
+      - name: Send Teams summary
+        run: |
+          curl -H 'Content-Type: application/json' -d \
+            "{\"text\": \"${{ steps.compile.outputs.message }}\"}" \
+            $TEAMS_WEBHOOK_URL

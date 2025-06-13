@@ -1,0 +1,8 @@
+
+[
+  {"name": "migration", "color": "0366d6", "description": "Tasks related to GHES to GHEC migrations"},
+  {"name": "audit", "color": "0e8a16", "description": "Repository audit and validation tasks"},
+  {"name": "dry-run", "color": "d93f0b", "description": "Indicates dry-run (non-destructive) operations"},
+  {"name": "gh-actions", "color": "5319e7", "description": "Related to GitHub Actions automation"},
+  {"name": "notification", "color": "fbca04", "description": "Slack and Teams integration notifications"}
+]

@@ -1,0 +1,23 @@
+
+name: Auto-label issues and PRs
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+jobs:
+  apply-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply label based on title keywords
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: |
+            ${{ contains(github.event.issue.title || github.event.pull_request.title, 'migration') && 'migration' || '' }}
+            ${{ contains(github.event.issue.title || github.event.pull_request.title, 'audit') && 'audit' || '' }}
+            ${{ contains(github.event.issue.title || github.event.pull_request.title, 'dry-run') && 'dry-run' || '' }}
+            ${{ contains(github.event.issue.title || github.event.pull_request.title, 'notification') && 'notification' || '' }}
+            ${{ contains(github.event.issue.title || github.event.pull_request.title, 'action') && 'gh-actions' || '' }}

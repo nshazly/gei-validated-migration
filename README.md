@@ -1,10 +1,14 @@
 # Chat GPT Generated GitHub Enterprise Importer (GEI) Migration Workflow
 
+> 🧠 **Prompt Engineering Note:**  
+> This workflow was created through iterative prompt engineering using ChatGPT. The full list of prompts and guidance on how to use them can be found in [docs/prompt_engineering.md](docs/prompt_engineering.md).
+
+This GitHub Actions workflow performs **parallel repository migrations** from **GitHub Enterprise Server (GHES)** to **GitHub Enterprise Cloud (GHEC)** using the [GitHub Enterprise Importer CLI extension](https://github.com/github/gh-gei).
 
 This GitHub Actions workflow performs **parallel repository migrations** from **GitHub Enterprise Server (GHES)** to **GitHub Enterprise Cloud (GHEC)** using the [GitHub Enterprise Importer CLI extension](https://github.com/github/gh-gei).
 
 It supports:
-- ✅ Dry-run audit validation with `gh gei audit-repo`
+- ✅ Dry-run/audit validation by providing a step to generate repository metadata in json format
 - 🚀 Real migration with `gh gei migrate-repo`
 - ⚙️ Configurable concurrency
 - 📢 Slack and Microsoft Teams notifications (individual + summary)
@@ -28,7 +32,7 @@ It supports:
 | `source_org`     | ✅ | Source GitHub Enterprise Server (GHES) org name |
 | `target_org`     | ✅ | Target GitHub Enterprise Cloud (GHEC) org name |
 | `max_parallel`   | ❌ | Maximum number of concurrent migrations (default: `4`) |
-| `dry_run`        | ❌ | If `true`, runs `gh gei audit-repo` instead of real migration (default: `false`) |
+| `dry_run`        | ❌ | If `true`, runs the audit step instead of real migration (default: `false`) |
 
 ---
 
@@ -58,7 +62,7 @@ It supports:
    - Parses `repos.json` to build a dynamic matrix of repositories.
 
 2. **Dry-Run Audit (if `dry_run: true`)**
-   - Runs `gh gei audit-repo` in parallel for each repo.
+   - Runs the audit step in parallel for each repo.
    - Generates `audit-summary.txt` artifact with results.
    - Sends final success/failure count to Slack & Teams.
 
